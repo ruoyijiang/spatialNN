@@ -1,0 +1,11 @@
+Package: visiumNN
+Type: Package
+Title: Nearest Neighbors Between Visium Clusters
+Version: 0.0.1
+Authors@R: person(given = "Your", family = "Name", role = c("aut","cre"), email = "you@example.com")
+Description: Utilities to precompute pairwise distances between two 10X Visium cluster sets and extract nearest neighbors, with bootstrap statistics and fraction-vs-threshold curves.
+License: MIT
+Encoding: UTF-8
+Depends: R (>= 4.1)
+Imports: sf, Seurat, SeuratObject, matrixStats, tibble, dplyr, stats, methods
+LazyData: true
