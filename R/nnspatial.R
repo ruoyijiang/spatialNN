@@ -1,12 +1,12 @@
-//' Precompute pairwise distances between two cluster sets (Visium)
-//'
-//' @param obj_input Seurat object with VISIUM image
-//' @param cl_a character vector of cluster labels for set A
-//' @param cl_b character vector of cluster labels for set B
-//' @param px_to_um numeric, pixel-to-micron conversion
-//' @param cluster_col, pick the ident to subset on, if NULL, will use Idents(obj_input)
-//' @return list with D_um (matrix), a_ids (cell ids for A), b_ids (cell ids for B)
-//' @export
+#' Precompute pairwise distances between two cluster sets (Visium)
+#'
+#' @param obj_input Seurat object with VISIUM image
+#' @param cl_a character vector of cluster labels for set A
+#' @param cl_b character vector of cluster labels for set B
+#' @param px_to_um numeric, pixel-to-micron conversion
+#' @param cluster_col, pick the ident to subset on, if NULL, will use Idents(obj_input)
+#' @return list with D_um (matrix), a_ids (cell ids for A), b_ids (cell ids for B)
+#' @export
 precompute_D <- function(obj_input, cl_a, cl_b,
                          px_to_um = 0.12028,
                          cluster_col = "SUBSET") {
@@ -39,71 +39,47 @@ precompute_D <- function(obj_input, cl_a, cl_b,
   list(D_um = D_um, a_ids = a$cell, b_ids = b$cell)
 }
 
-//' Nearest neighbors between A and B (exact or bootstrap)
-//'
-//' @param pre list returned by precompute_D()
-//' @param n_a,n_b optional sizes when bootstrap = TRUE
-//' @param bootstrap logical; if TRUE, sample rows/cols with replacement
-//' @param replace_a,replace_b logical; sampling behavior
-//' @param ties.method passed to max.col()
-//' @return list with cell_id_a, nearest_b, nearest_dist_um (and indices in bootstrap)
-//' @export
-compute_nearest <- function(pre,
-                            n_a = NULL, n_b = NULL,
-                            bootstrap = FALSE,
-                            replace_a = TRUE, replace_b = TRUE,
-                            ties.method = "first") {
-  Draw <- pre$D_um
-  D <- matrix(as.numeric(Draw), nrow = nrow(Draw), ncol = ncol(Draw),
-              dimnames = dimnames(Draw))
-  a_ids <- pre$a_ids
-  b_ids <- pre$b_ids
+#' Nearest neighbors between A and B (exact or bootstrap)
+#'
+#' @param pre list returned by precompute_D()
+#' @param n_a,n_b optional sizes when bootstrap = TRUE
+#' @param bootstrap logical; if TRUE, sample rows/cols with replacement
+#' @param replace_a,replace_b logical; sampling behavior
+#' @return list with cell_id_a, nearest_b, nearest_dist_um (and indices in bootstrap)
+#' @export
+compute_nearest <- function(input_D_um, n_a = NULL, n_b = NULL, bootstrap = FALSE) {
+ if(!bootstrap){
+      a_ids <- input_D_um$a_ids
+      b_ids <- input_D_um$b_ids
+      D <- input_D_um$D_um
+  } else {
+      a_ids  <- sample.int(nrow(input_D_um$D_um), n_a, replace = bootstrap)
+      b_ids  <- sample.int(ncol(input_D_um$D_um), n_b, replace = bootstrap)
+      D <- input_D_um$D_um[a_ids, b_ids, drop = FALSE]
+  }
+
+  # check
   stopifnot(is.matrix(D), length(a_ids) == nrow(D), length(b_ids) == ncol(D))
 
-  row_mins <- function(M) {
-    if (requireNamespace("matrixStats", quietly = TRUE)) {
-      matrixStats::rowMins(M)
-    } else {
-      apply(M, 1, min)
-    }
-  }
-
-  if (!bootstrap) {
-    nn_idx  <- max.col(-D, ties.method = ties.method)
-    nn_dist <- row_mins(D)
-    return(list(
-      cell_id_a       = a_ids,
-      nearest_b       = b_ids[nn_idx],
-      nearest_dist_um = as.numeric(nn_dist)
-    ))
-  }
-
-  if (is.null(n_a)) n_a <- nrow(D)
-  if (is.null(n_b)) n_b <- ncol(D)
-  ia <- sample.int(nrow(D), n_a, replace = replace_a)
-  ib <- sample.int(ncol(D), n_b, replace = replace_b)
-
-  Dsub    <- D[ia, ib, drop = FALSE]
-  nn_sub  <- max.col(-Dsub, ties.method = ties.method)
-  nn_dist <- row_mins(Dsub)
+  nn_idx <- max.col(-D, ties.method = "first")
+  nn_dist_um  <- rowMins(D)
 
   list(
-    cell_id_a       = a_ids[ia],
-    nearest_b       = b_ids[ib[nn_sub]],
-    nearest_dist_um = as.numeric(nn_dist),
-    ia = ia, ib = ib, ib_chosen = ib[nn_sub]
+    cell_id_a       = a_ids,
+    nearest_b       = b_ids[nn_idx],
+    nearest_dist_um = as.numeric(nn_dist_um)
   )
 }
 
-//' Bootstrap summary of nearest-neighbor distances
-//'
-//' @param pre list from precompute_D()
-//' @param n_a,n_b sample sizes for rows/cols
-//' @param R number of bootstrap replicates
-//' @param seed random seed
-//' @param stat "median" or "mean"
-//' @return list with bootstrap vector and 90% CI (5th/95th percentiles)
-//' @export
+#' Bootstrap summary of nearest-neighbor distances
+#'
+#' @param pre list from precompute_D()
+#' @param n_a,n_b sample sizes for rows/cols
+#' @param R number of bootstrap replicates
+#' @param seed random seed
+#' @param stat "median" or "mean"
+#' @return list with bootstrap vector and 90% CI (5th/95th percentiles)
+#' @export
 boot_nn_stat <- function(pre, n_a, n_b, R = 1000, seed = 1, stat = c("median","mean")) {
   stat <- match.arg(stat)
   set.seed(seed)
@@ -114,15 +90,15 @@ boot_nn_stat <- function(pre, n_a, n_b, R = 1000, seed = 1, stat = c("median","m
   list(boot = vals, ci90 = stats::quantile(vals, c(0.05, 0.95)))
 }
 
-//' Fraction below distance thresholds
-//'
-//' @param out list from compute_nearest() (non-bootstrap), must contain nearest_dist_um
-//' @param obj Seurat object to compute denominator from (SUBSET matches subset_id)
-//' @param cluster_col, pick the ident to subset on, if NULL, will use Idents(obj_input)
-//' @param subset_id character label for denominator
-//' @param step_um,max_um numeric
-//' @return tibble with thresholds and fractions
-//' @export
+#' Fraction below distance thresholds
+#'
+#' @param out list from compute_nearest() (non-bootstrap), must contain nearest_dist_um
+#' @param obj Seurat object to compute denominator from (SUBSET matches subset_id)
+#' @param cluster_col, pick the ident to subset on, if NULL, will use Idents(obj_input)
+#' @param subset_id character label for denominator
+#' @param step_um,max_um numeric
+#' @return tibble with thresholds and fractions
+#' @export
 compute_frac_vs_threshold <- function(out, obj, subset_id = "T cell", cluster_col = "SUBSET",
                                       step_um = 1,
                                       max_um = 20) {
